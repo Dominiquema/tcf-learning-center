@@ -78,6 +78,11 @@ body.locked header,body.locked main{visibility:hidden}
 .frost-content *{pointer-events:none!important}
 .frost-shade{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px;background:rgba(244,247,251,.48);backdrop-filter:blur(7px) saturate(1.3);-webkit-backdrop-filter:blur(7px) saturate(1.3);border:1px solid rgba(180,195,215,.6);border-radius:12px}
 .frost-note{font-size:15px;line-height:1.6;color:#33475e}
+.opt-blur{display:inline-block;vertical-align:top;max-width:calc(100% - 2.2em);filter:blur(7px) saturate(.6);-webkit-filter:blur(7px) saturate(.6);opacity:.55;user-select:none;-webkit-user-select:none;pointer-events:none}
+.frost-q{filter:blur(7px) saturate(.6);-webkit-filter:blur(7px) saturate(.6);opacity:.55;user-select:none;-webkit-user-select:none;pointer-events:none}
+.frost-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0;padding:10px 12px;border-radius:10px;background:#f4f7fb;border:1px solid #e3e8f2}
+.frost-bar .frost-note{flex:1 1 260px;font-size:14px}
+.au-buf{font-size:12px;color:#889;min-width:0}
 .opt-zh{display:block;font-size:13px;color:#5b6b7f;font-weight:400;margin-top:2px;line-height:1.5}
 </style></head><body>
 <header><div class="logo">TCF Canada <span>学习中心</span></div><nav id="nav"></nav></header>
@@ -219,10 +224,32 @@ function auOnError(el){
 function listenPlayerHtml(){
   const local=auIsLocal();
   const name=local?esc(__auName):('在线音频：本套录音 '+hostedAudioUrl(listeningSet)+'（选套后自动加载；也可点右侧按钮改用本地文件）');
-  return `<div class="audio-bar listen-bar"><button type="button" class="audio-play" id="auBtn" aria-label="播放或暂停" onclick="toggleAudio()">${__auPlaying?'⏸':'▶'}</button><span class="audio-label">🎧 听力</span><button type="button" class="audio-play seek" onclick="seekAudio(-3)">−3s</button><button type="button" class="audio-play seek" onclick="seekAudio(3)">+3s</button><input type="range" id="auProg" min="0" max="1000" value="0" oninput="auSeekInput(this.value)"><span class="audio-rate" id="auTime">00:00 / 00:00</span><label class="audio-rate">倍速 <select id="auSpeed" onchange="setAuSpeed(this.value)">${[0.5,0.75,1,1.25,1.5,2].map(v=>`<option value="${v}" ${__auRate===v?'selected':''}>${v}×</option>`).join('')}</select></label><label class="file-lab">📁 选择本套音频<input type="file" id="auFile" accept="audio/*" hidden onchange="loadAudioFile(this)"></label><span class="au-name" id="auName">${name}</span><audio id="auEl" preload="metadata" ontimeupdate="auTick()" onloadedmetadata="__auHostErr='';auTick()" onerror="auOnError(this)" onended="auEnded()"></audio></div><p class="muted" style="font-size:12.5px;margin:4px 0">考试流程：先听录音，题目与选项默认遮罩，点「显示选项」后作答。整套音频按文本长度比例定位/高亮（估算，非精确词级对齐）；无音频时点原文句子/词可用 Audrey 语音从该处朗读。</p>`;
+  return `<div class="audio-bar listen-bar"><button type="button" class="audio-play" id="auBtn" aria-label="播放或暂停" onclick="toggleAudio()">${__auPlaying?'⏸':'▶'}</button><span class="audio-label">🎧 听力</span><button type="button" class="audio-play seek" onclick="seekAudio(-3)">−3s</button><button type="button" class="audio-play seek" onclick="seekAudio(3)">+3s</button><input type="range" id="auProg" min="0" max="1000" value="0" oninput="auDragInput(this.value)" onchange="auSeekInput(this.value)"><span class="audio-rate" id="auTime">00:00 / 00:00</span><span class="au-buf" id="auBuf"></span><label class="audio-rate">倍速 <select id="auSpeed" onchange="setAuSpeed(this.value)">${[0.5,0.75,1,1.25,1.5,2].map(v=>`<option value="${v}" ${__auRate===v?'selected':''}>${v}×</option>`).join('')}</select></label><label class="file-lab">📁 选择本套音频<input type="file" id="auFile" accept="audio/*" hidden onchange="loadAudioFile(this)"></label><span class="au-name" id="auName">${name}</span></div><p class="muted" style="font-size:12.5px;margin:4px 0">考试流程：先听录音；A1/A2 题目与选项内容默认模糊，可直接点 A/B/C/D 作答，点「显示选项」可看清内容。整套音频按文本长度比例定位/高亮（估算，非精确词级对齐）；无音频时点原文句子/词可用 Audrey 语音从该处朗读。</p>`;
 }
 let __auPlaying=false;
-function auEl(){return document.getElementById('auEl')}
+const __auEls={}; let __auDrag=false, __auBufT=null;
+function auSetBuf(on){ clearTimeout(__auBufT); const b=document.getElementById('auBuf'); if(b) b.textContent=on?'⏳ 缓冲中…':''; }
+function auMake(k){
+  const a=document.createElement('audio'); a.preload='metadata'; a.dataset.set=k; a.__pend=null;
+  const mine=()=>__auEls[listeningSet]===a;
+  a.addEventListener('loadedmetadata',()=>{ if(a.__pend!=null){ const t=a.__pend; a.__pend=null; try{ a.currentTime=Math.max(0,Math.min(a.duration-0.05,t)); }catch(e){} } if(mine()){ if(__auHostErr===listeningSet) __auHostErr=''; auTick(); } });
+  ['timeupdate','durationchange','play','pause','seeked'].forEach(ev=>a.addEventListener(ev,()=>{ if(mine()) auTick(); }));
+  a.addEventListener('waiting',()=>{ if(mine()&&!a.paused) auSetBuf(true); });
+  a.addEventListener('seeking',()=>{ if(!mine()) return; clearTimeout(__auBufT); __auBufT=setTimeout(()=>{ if(a.seeking&&mine()) auSetBuf(true); },300); });
+  ['playing','canplay','seeked','pause'].forEach(ev=>a.addEventListener(ev,()=>{ if(mine()) auSetBuf(false); }));
+  a.addEventListener('error',()=>{ if(mine()) { auSetBuf(false); auOnError(a); } });
+  a.addEventListener('ended',()=>{ if(mine()) auEnded(); });
+  return a;
+}
+/* One persistent <audio> per set, kept outside the re-rendered quiz DOM so answering / revealing / changing question never reloads it. */
+function auEl(){
+  const k=listeningSet; if(!k) return null;
+  Object.keys(__auEls).forEach(o=>{ if(o!==k){ const x=__auEls[o]; try{ x.pause(); x.removeAttribute('src'); x.load(); x.remove(); }catch(e){} delete __auEls[o]; __auTime=0; } });
+  let a=__auEls[k];
+  if(!a){ a=auMake(k); a.id='auEl'; let host=document.getElementById('auHost'); if(!host){ host=document.createElement('div'); host.id='auHost'; host.hidden=true; document.body.appendChild(host); } host.appendChild(a); __auEls[k]=a; }
+  const u=effAuUrl(); if(a.dataset.u!==u){ a.dataset.u=u; a.__pend=null; a.src=u; }
+  return a;
+}
 function loadAudioFile(inp){
   const f=inp.files&&inp.files[0]; if(!f) return;
   try{ if(__auUrl) URL.revokeObjectURL(__auUrl); }catch(e){}
@@ -233,19 +260,29 @@ function loadAudioFile(inp){
 function toggleAudio(){
   const a=auEl(); if(!a) return;
   if(!auIsLocal()&&__auHostErr===listeningSet){ const fi=document.getElementById('auFile'); if(fi) fi.click(); return; }
-  const u=effAuUrl();
-  if(a.dataset.u!==u){ a.dataset.u=u; a.src=u; }
-  if(a.paused){ a.playbackRate=__auRate; a.play().catch(()=>{}); } else a.pause();
+  if(a.paused){
+    try{ if('speechSynthesis' in window) window.speechSynthesis.cancel(); }catch(e){} __speaking=false;
+    a.preload='auto'; a.defaultPlaybackRate=__auRate; a.playbackRate=__auRate;
+    const pr=a.play(); if(pr&&pr.catch) pr.catch(()=>auTick());
+  } else a.pause();
+  auTick();
 }
-function seekAudio(d){ const a=auEl(); if(a&&a.duration) a.currentTime=Math.max(0,Math.min(a.duration,a.currentTime+d)); }
-function setAuSpeed(v){ __auRate=parseFloat(v); const a=auEl(); if(a) a.playbackRate=__auRate; }
-function auSeekInput(v){ const a=auEl(); if(a&&a.duration) a.currentTime=a.duration*v/1000; }
+function auDur(a){ return (a&&a.duration&&isFinite(a.duration))?a.duration:0; }
+function auSeekTo(t){
+  const a=auEl(); if(!a) return; const D=auDur(a);
+  if(!D){ a.__pend=Math.max(0,t); if(a.preload==='none') a.preload='metadata'; return; }
+  a.currentTime=Math.max(0,Math.min(D-0.05,t)); auTick();
+}
+function seekAudio(d){ const a=auEl(); if(!a) return; const base=(a.__pend!=null)?a.__pend:(a.currentTime||0); auSeekTo(base+d); }
+function setAuSpeed(v){ __auRate=parseFloat(v)||1; const a=auEl(); if(a){ a.defaultPlaybackRate=__auRate; a.playbackRate=__auRate; } }
+function auDragInput(v){ __auDrag=true; const a=auEl(); const D=auDur(a); const t=document.getElementById('auTime'); if(t&&D) t.textContent=auFmt(D*v/1000)+' / '+auFmt(D); }
+function auSeekInput(v){ __auDrag=false; const a=auEl(); if(!a) return; const D=auDur(a); if(D) auSeekTo(D*v/1000); }
 function auFmt(s){ s=Math.max(0,Math.floor(s||0)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
 function auTick(){
   const a=auEl(); if(!a) return; if(a.duration&&isFinite(a.duration)&&__auHostErr===listeningSet) __auHostErr=''; __auTime=a.currentTime||0; __auPlaying=!a.paused;
-  const t=document.getElementById('auTime'); if(t) t.textContent=auFmt(a.currentTime)+' / '+auFmt(a.duration);
+  const t=document.getElementById('auTime'); if(t&&!__auDrag) t.textContent=auFmt(a.currentTime)+' / '+auFmt(a.duration);
   const nm=document.getElementById('auName'); if(nm&&!auIsLocal()&&__auHostErr!==listeningSet){ const want='在线音频：本套录音 '+hostedAudioUrl(listeningSet)+'（选套后自动加载；也可点右侧按钮改用本地文件）'; if(nm.textContent!==want) nm.textContent=want; }
-  const p=document.getElementById('auProg'); if(p&&a.duration) p.value=Math.round(a.currentTime/a.duration*1000);
+  const p=document.getElementById('auProg'); if(p&&a.duration&&!__auDrag) p.value=Math.round(a.currentTime/a.duration*1000);
   const b=document.getElementById('auBtn'); if(b) b.textContent=a.paused?'▶':'⏸';
   highlightByFraction(a.duration?a.currentTime/a.duration:0);
 }
@@ -274,7 +311,7 @@ function fracOfWord(gi){
 }
 function seekOrSpeak(frac, wordIdx){
   const a=auEl();
-  if(auActive()){ const u=effAuUrl(); if(a.dataset.u!==u){a.dataset.u=u;a.src=u;} a.currentTime=Math.max(0,frac*a.duration); a.playbackRate=__auRate; a.play().catch(()=>{}); return; }
+  if(auActive()){ auSeekTo(frac*a.duration); a.playbackRate=__auRate; if(a.paused){ a.preload='auto'; const pr=a.play(); if(pr&&pr.catch) pr.catch(()=>{}); } return; }
   // TTS fallback: speak from clicked word onward (or sentence start approx by fraction)
   try{
     const q=dataOf()[cur]; const words=String(q.transcript||'').split(/\s+/).filter(Boolean);
@@ -312,7 +349,7 @@ function renderHome(){const w=wrongList();$('page-home').innerHTML=`<div class="
 function fmt(s){s=Math.max(0,s);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
 function startQuiz(k,focusId,setKey){skill=k; if(k==='reading'&&setKey&&READSETS[setKey])readingSet=setKey; if(k==='listening'&&setKey&&LMETA[setKey])listeningSet=setKey; answers={};revealed={};showExpl={};selSent=-1;passTab='fr';cur=0; if(focusId){const d=dataOf();const ix=d.findIndex(q=>q.id===focusId); if(ix>=0)cur=ix} mode=document.querySelector('input[name=mode]:checked')?.value||mode||'practice'; limit=(k==='reading'?3600:2100); seconds=(mode==='exam'?limit:0); clearInterval(timer); timer=setInterval(()=>{seconds+=(mode==='exam'?-1:1); const el=$('timer'); if(el)el.textContent=fmt(seconds); if(mode==='exam'&&seconds<=0){submitQuiz()}},1000); route='quiz'; renderQuiz(); show(); renderNav()}
 function renderQuiz(){const d=dataOf();const q=d[cur];const total=d.length; const done=Object.keys(answers).length;
- const lqKey=listeningSet+'-'+q.id; const maskL=skill==='listening'&&q.id<=10; const optShown=!maskL||!!__optOpen[lqKey]||!!answers[q.id]||!!revealed[q.id]||!!showExpl[q.id]; const ozh=(skill==='listening'&&typeof OZH!=='undefined')?(OZH[lqKey]||null):null;
+ const lqKey=listeningSet+'-'+q.id; const maskL=skill==='listening'&&q.id<=10; const optShown=!maskL||!!__optOpen[lqKey]||!!revealed[q.id]||!!showExpl[q.id]; const optMask=maskL&&!optShown; const ozh=(skill==='listening'&&typeof OZH!=='undefined')?(OZH[lqKey]||null):null;
  let player=''; if(skill==='listening'){player=listenPlayerHtml()}
  const lvl=levelOf(cur);
  // grouped grid for reading, flat for listening
@@ -325,18 +362,18 @@ function renderQuiz(){const d=dataOf();const q=d[cur];const total=d.length; cons
  } else {
    gridHtml=`<div class="qgrid">${d.map((qq,i)=>`<button class="${i===cur?'cur':''} ${answers[qq.id]?'done':''}" onclick="goQ(${i})">${qq.id}${isFav(qq)?' ★':''}</button>`).join('')}</div>`;
  }
- const optionsHtml=q.options.map((o,i)=>{const L='ABCD'[i];let cls='opt';if(answers[q.id]===L)cls+=' sel';if(revealed[q.id]){if(L===q.answer)cls+=' correct';else if(answers[q.id]===L)cls+=' wrong'}return `<button class="${cls}" onclick="answers[${q.id}]='${L}';renderQuiz()"><b>${L}.</b> ${esc(o)}${ozh&&ozh[i]?`<span class="opt-zh">${esc(ozh[i])}</span>`:''}</button>`}).join('');
+ const optionsHtml=q.options.map((o,i)=>{const L='ABCD'[i];let cls='opt';if(answers[q.id]===L)cls+=' sel';if(revealed[q.id]){if(L===q.answer)cls+=' correct';else if(answers[q.id]===L)cls+=' wrong'}const inner=`${esc(o)}${ozh&&ozh[i]?`<span class="opt-zh">${esc(ozh[i])}</span>`:''}`;return `<button class="${cls}" onclick="answers[${q.id}]='${L}';renderQuiz()"><b>${L}.</b> ${optMask?`<span class="opt-blur" aria-hidden="true">${inner}</span>`:inner}</button>`}).join('');
  $('page-quiz').innerHTML=`<div class="quiz-toolbar"><label><input type="radio" name="mode" value="practice" ${mode==='practice'?'checked':''} onchange="mode=this.value;startQuiz(skill)"> 练习模式（计时）</label> <label><input type="radio" name="mode" value="exam" ${mode==='exam'?'checked':''} onchange="mode=this.value;startQuiz(skill)"> 模考模式（${skill==='reading'?'60:00':'35:00'}倒计时）</label> <span class="badge" id="timer">${fmt(seconds)}</span> <span class="badge gray">已答 ${done}/${total}</span> <button class="btn warn" onclick="submitQuiz()">提交答卷 Soumettre</button> ${skill==='listening'?`<label>套题 <select onchange="listeningSet=this.value;startQuiz('listening')"><optgroup label="样题 Sample · 示例">${['sample1','sample2'].map(k=>`<option value="${k}" ${listeningSet===k?'selected':''}>${LMETA[k].label}</option>`).join('')}</optgroup><optgroup label="正式测试 Test 1–42">${Object.keys(LMETA).filter(k=>k.indexOf('test')===0).map(k=>`<option value="${k}" ${listeningSet===k?'selected':''}>${LMETA[k].label}</option>`).join('')}</optgroup></select></label>`:''} ${skill==='reading'?`<label>套题 <select onchange="readingSet=this.value;startQuiz('reading')"><optgroup label="样题 Sample · 示例">${['sample1','sample2'].map(k=>`<option value="${k}" ${readingSet===k?'selected':''}>${RSETMETA[k].label}</option>`).join('')}</optgroup><optgroup label="正式测试 Test 1–42">${Object.keys(RSETMETA).filter(k=>k.indexOf('test')===0).map(k=>`<option value="${k}" ${readingSet===k?'selected':''}>${RSETMETA[k].label}</option>`).join('')}</optgroup></select></label>`:''}</div><div class="fav-row"><button class="chip fav-chip" onclick="go('wrong')">★ 我的收藏（错题本页查看）</button></div>
  <div class="layout"><div class="card"><h3>${skill==='reading'?curReadSet().label+' 题号':curLSet().label+' 题号'}</h3>${gridHtml}<p class="muted">绿色=已答。★=已收藏。A1–C2 按题序分组。</p></div>
  <div><div class="card">${player}<h3>Question ${q.id} / 共 ${total} 题 ${lvl?`<span class="lvl-badge lvl-${lvl}">${lvl} · 难度（按题序）</span>`:''} <button class="star-btn" title="收藏这道题" onclick="toggleFav(${q.id})">${isFav(q)?'★':'☆'}</button></h3>
  ${passageHtml(q)}
- ${maskL&&!optShown?`<div class="frost-wrap"><div class="frost-content" aria-hidden="true" inert><p><b>${esc(q.question||'')}</b></p>${q.qzh?`<p class="muted" style="font-size:14px;margin-top:-6px">题意：${esc(q.qzh)}</p>`:''}<div>${optionsHtml}</div></div><div class="frost-shade"><div class="frost-note">🧏 先听录音 Écoutez d'abord<br><span style="font-size:13px">A1/A2 模拟真实考试：题目与选项随录音一起听，先遮罩；听到本题后显示选项作答。</span></div><button class="btn" onclick="__optOpen['${lqKey}']=true;renderQuiz()">👁 显示选项 Voir les options</button></div></div>`:`<p><b>${esc(q.question||'')}</b></p>${q.qzh?`<p class="muted" style="font-size:14px;margin-top:-6px">题意：${esc(q.qzh)}</p>`:''}`}
+ ${optMask?`<div class="frost-q" aria-hidden="true"><p><b>${esc(q.question||'')}</b></p>${q.qzh?`<p class="muted" style="font-size:14px;margin-top:-6px">题意：${esc(q.qzh)}</p>`:''}</div><div class="frost-bar"><span class="frost-note">🧏 先听录音 Écoutez d'abord · A1/A2 模拟真实考试：选项内容随录音听，听到后直接点 A/B/C/D 作答。</span><button class="btn" onclick="__optOpen['${lqKey}']=true;renderQuiz()">👁 显示选项 Voir les options</button></div>`:`<p><b>${esc(q.question||'')}</b></p>${q.qzh?`<p class="muted" style="font-size:14px;margin-top:-6px">题意：${esc(q.qzh)}</p>`:''}`}
  ${skill==='listening'?listenBodyHtml(q):''}
- ${maskL&&!optShown?'':`<div>${optionsHtml}</div>`}
+ <div>${optionsHtml}</div>
  ${revealed[q.id]?answerBanner(q):''}
  ${showExpl[q.id]?formatExpl(q,answers[q.id]):''}
  <div class="stickybar"><button class="btn alt" onclick="goQ(cur-1)">← 上一题</button><button class="btn ${revealed[q.id]?'on':''}" onclick="revealed[${q.id}]=!revealed[${q.id}];renderQuiz()">${revealed[q.id]?'隐藏答案':'显示答案'}</button><button class="btn ${showExpl[q.id]?'on':''}" onclick="showExpl[${q.id}]=!showExpl[${q.id}];renderQuiz()">${showExpl[q.id]?'收起解析':'答案解析'}</button><button class="btn alt" onclick="goQ(cur+1)">下一题 →</button><button class="btn warn" onclick="submitQuiz()">提交</button><span class="muted">${q.id}/${total}</span></div>
- </div></div></div>`; if(skill==='listening'){ const a=auEl(); if(a){ const u=effAuUrl(); if(a.dataset.u!==u){ a.dataset.u=u; a.src=u; } a.playbackRate=__auRate; try{ if(Math.abs((a.currentTime||0)-(__auTime||0))>1.5) a.currentTime=__auTime||0; }catch(e){} } } }
+ </div></div></div>`; if(skill==='listening'){ const a=auEl(); if(a){ a.playbackRate=__auRate; auTick(); if(a.seeking) auSetBuf(true); } } else { Object.values(__auEls).forEach(x=>{ try{ x.pause(); }catch(e){} }); } }
 
 function formatExpl(q,myAns){
   const letter=q.answer||'';
